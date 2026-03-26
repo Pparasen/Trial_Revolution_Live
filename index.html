@@ -437,89 +437,95 @@ function updateTicker() {
 
 setInterval(updateTicker, 5000);
 
-// ── Navigation (con History API para botón atrás del móvil) ───────────────
+// ── Navigation — Hash routing (funciona en todos los móviles) ────────────
+// El hash define la vista actual: '' → home | 'cat-TR1' → categoría | 'piloto-3' → piloto
+
+function getHash() {
+  return window.location.hash.replace('#', '');
+}
+
+function setHash(h) {
+  window.location.hash = h;
+}
+
 function showView(id) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   window.scrollTo(0, 0);
-  // Mostrar/ocultar botón atrás según la URL state
-  const state = history.state || {};
+  const hash = getHash();
+  const isHome = !hash || hash === '';
   document.getElementById('btnBack').className =
-    'btn-back' + (state.view && state.view !== 'home' ? ' visible' : '');
+    'btn-back' + (isHome ? '' : ' visible');
 }
 
-function navHome(addToHistory = true) {
+function navHome() {
   _currentCat = null;
   _currentPilotIdx = null;
-  if (addToHistory) {
-    history.pushState({ view: 'home' }, '', '#');
-  }
-  document.getElementById('topbarTitle').textContent = 'Trial Revolution';
-  document.getElementById('topbarSub').textContent = 'Campeonato de Trial de Castilla y León 2026';
-  showView('viewHome');
-  renderCurrentView();
+  setHash('');
+  // hashchange se encarga del render
 }
 
-function navCat(cat, addToHistory = true) {
+function navCat(cat) {
   _currentCat = cat;
   _currentPilotIdx = null;
-  if (addToHistory) {
-    history.pushState({ view: 'cat', cat }, '', '#cat-' + cat);
-  }
-  document.getElementById('topbarTitle').textContent = cat + ' — Clasificación';
-  document.getElementById('topbarSub').textContent = _data?.raceName || 'Trial Revolution';
-  showView('viewCat');
-  renderCat();
+  setHash('cat-' + cat);
+  // hashchange se encarga del render
 }
 
-function navPilot(pilotIdx, addToHistory = true) {
+function navPilot(pilotIdx) {
   _currentPilotIdx = pilotIdx;
-  if (addToHistory) {
-    history.pushState({ view: 'pilot', cat: _currentCat, pilotIdx }, '', '#piloto-' + pilotIdx);
-  }
-  showView('viewPilot');
-  renderPilot();
+  setHash('piloto-' + _currentCat + '-' + pilotIdx);
+  // hashchange se encarga del render
 }
 
-// Botón atrás del navegador / móvil
-window.addEventListener('popstate', function(e) {
-  const state = e.state || { view: 'home' };
-  if (state.view === 'pilot') {
-    _currentCat = state.cat;
-    _currentPilotIdx = state.pilotIdx;
-    document.getElementById('topbarTitle').textContent =
-      _data?.pilots?.[state.pilotIdx] ? fmtName(_data.pilots[state.pilotIdx].name) : 'Piloto';
-    document.getElementById('topbarSub').textContent =
-      (state.cat || '') + ' · Nº ' + (_data?.pilots?.[state.pilotIdx]?.dorsal || '—');
-    showView('viewPilot');
-    renderPilot();
-  } else if (state.view === 'cat') {
-    _currentCat = state.cat;
-    _currentPilotIdx = null;
-    document.getElementById('topbarTitle').textContent = state.cat + ' — Clasificación';
-    document.getElementById('topbarSub').textContent = _data?.raceName || 'Trial Revolution';
-    showView('viewCat');
-    renderCat();
-  } else {
-    _currentCat = null;
-    _currentPilotIdx = null;
-    document.getElementById('topbarTitle').textContent = 'Trial Revolution';
-    document.getElementById('topbarSub').textContent = 'Campeonato de Trial de Castilla y León 2026';
-    showView('viewHome');
-    renderCurrentView();
-  }
-});
-
-// El botón "←" del topbar llama directamente al historial del navegador
 function goBack() {
   history.back();
 }
 
+// Toda la navegación pasa por aquí — incluido el botón atrás del móvil
+window.addEventListener('hashchange', function() {
+  routeFromHash();
+});
+
+function routeFromHash() {
+  const hash = getHash();
+
+  if (!hash || hash === '') {
+    // HOME
+    _currentCat = null;
+    _currentPilotIdx = null;
+    document.getElementById('topbarTitle').textContent = _data?.raceName || 'Trial Revolution';
+    document.getElementById('topbarSub').textContent = 'Campeonato de Trial de Castilla y León 2026';
+    showView('viewHome');
+    renderHome();
+
+  } else if (hash.startsWith('cat-')) {
+    // CATEGORÍA
+    const cat = hash.replace('cat-', '');
+    _currentCat = cat;
+    _currentPilotIdx = null;
+    document.getElementById('topbarTitle').textContent = cat + ' — Clasificación';
+    document.getElementById('topbarSub').textContent = _data?.raceName || 'Trial Revolution';
+    showView('viewCat');
+    renderCat();
+
+  } else if (hash.startsWith('piloto-')) {
+    // PILOTO: formato piloto-CAT-idx
+    const parts = hash.replace('piloto-', '').split('-');
+    const idx = parseInt(parts[parts.length - 1]);
+    const cat = parts.slice(0, parts.length - 1).join('-');
+    _currentCat = cat;
+    _currentPilotIdx = isNaN(idx) ? null : idx;
+    const p = _data?.pilots?.[_currentPilotIdx];
+    document.getElementById('topbarTitle').textContent = p ? fmtName(p.name) : 'Piloto';
+    document.getElementById('topbarSub').textContent = cat + (p ? ' · Nº ' + (p.dorsal||'—') : '');
+    showView('viewPilot');
+    renderPilot();
+  }
+}
+
 function renderCurrentView() {
-  const state = history.state || { view: 'home' };
-  if (state.view === 'pilot' && _currentPilotIdx !== null) renderPilot();
-  else if (state.view === 'cat' && _currentCat) renderCat();
-  else renderHome();
+  routeFromHash();
 }
 
 // ── Render: Home ─────────────────────────────────────────────────────────
@@ -743,10 +749,10 @@ function fmtName(n) {
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────
-// Inicializar el estado del historial para la pantalla home
-history.replaceState({ view: 'home' }, '', window.location.href);
-
-fetchData();
+fetchData().then(() => {
+  // Tras cargar datos, enrutar según el hash actual (permite deep links)
+  routeFromHash();
+});
 startRefresh();
 </script>
 </body>
