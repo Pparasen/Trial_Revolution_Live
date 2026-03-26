@@ -384,7 +384,6 @@ let _currentCat = null;
 let _currentPilotIdx = null;
 let _lastFetch = null;
 let _refreshTimer = null;
-let _navStack = []; // 'home' | 'cat' | 'pilot'
 
 const CAT_COLORS = {
   TR1:'#DC2626', TR2:'#2563A8', TR3:'#16A34A',
@@ -438,56 +437,89 @@ function updateTicker() {
 
 setInterval(updateTicker, 5000);
 
-// ── Navigation ────────────────────────────────────────────────────────────
+// ── Navigation (con History API para botón atrás del móvil) ───────────────
 function showView(id) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.getElementById(id).classList.add('active');
-  const btnBack = document.getElementById('btnBack');
-  btnBack.className = 'btn-back' + (_navStack.length > 0 ? ' visible' : '');
+  window.scrollTo(0, 0);
+  // Mostrar/ocultar botón atrás según la URL state
+  const state = history.state || {};
+  document.getElementById('btnBack').className =
+    'btn-back' + (state.view && state.view !== 'home' ? ' visible' : '');
 }
 
-function goBack() {
-  if (_navStack.length === 0) return;
-  _navStack.pop();
-  if (_navStack.length === 0) {
-    navHome();
-  } else if (_navStack[_navStack.length - 1] === 'cat') {
-    navCat(_currentCat, false);
-  }
-}
-
-function navHome() {
-  _navStack = [];
+function navHome(addToHistory = true) {
   _currentCat = null;
   _currentPilotIdx = null;
-  showView('viewHome');
+  if (addToHistory) {
+    history.pushState({ view: 'home' }, '', '#');
+  }
   document.getElementById('topbarTitle').textContent = 'Trial Revolution';
   document.getElementById('topbarSub').textContent = 'Campeonato de Trial de Castilla y León 2026';
+  showView('viewHome');
   renderCurrentView();
 }
 
-function navCat(cat, push=true) {
-  if (push) _navStack.push('cat');
+function navCat(cat, addToHistory = true) {
   _currentCat = cat;
   _currentPilotIdx = null;
-  showView('viewCat');
-  const color = CAT_COLORS[cat] || '#555';
+  if (addToHistory) {
+    history.pushState({ view: 'cat', cat }, '', '#cat-' + cat);
+  }
   document.getElementById('topbarTitle').textContent = cat + ' — Clasificación';
   document.getElementById('topbarSub').textContent = _data?.raceName || 'Trial Revolution';
+  showView('viewCat');
   renderCat();
 }
 
-function navPilot(pilotIdx) {
-  _navStack.push('pilot');
+function navPilot(pilotIdx, addToHistory = true) {
   _currentPilotIdx = pilotIdx;
+  if (addToHistory) {
+    history.pushState({ view: 'pilot', cat: _currentCat, pilotIdx }, '', '#piloto-' + pilotIdx);
+  }
   showView('viewPilot');
   renderPilot();
 }
 
+// Botón atrás del navegador / móvil
+window.addEventListener('popstate', function(e) {
+  const state = e.state || { view: 'home' };
+  if (state.view === 'pilot') {
+    _currentCat = state.cat;
+    _currentPilotIdx = state.pilotIdx;
+    document.getElementById('topbarTitle').textContent =
+      _data?.pilots?.[state.pilotIdx] ? fmtName(_data.pilots[state.pilotIdx].name) : 'Piloto';
+    document.getElementById('topbarSub').textContent =
+      (state.cat || '') + ' · Nº ' + (_data?.pilots?.[state.pilotIdx]?.dorsal || '—');
+    showView('viewPilot');
+    renderPilot();
+  } else if (state.view === 'cat') {
+    _currentCat = state.cat;
+    _currentPilotIdx = null;
+    document.getElementById('topbarTitle').textContent = state.cat + ' — Clasificación';
+    document.getElementById('topbarSub').textContent = _data?.raceName || 'Trial Revolution';
+    showView('viewCat');
+    renderCat();
+  } else {
+    _currentCat = null;
+    _currentPilotIdx = null;
+    document.getElementById('topbarTitle').textContent = 'Trial Revolution';
+    document.getElementById('topbarSub').textContent = 'Campeonato de Trial de Castilla y León 2026';
+    showView('viewHome');
+    renderCurrentView();
+  }
+});
+
+// El botón "←" del topbar llama directamente al historial del navegador
+function goBack() {
+  history.back();
+}
+
 function renderCurrentView() {
-  if (_navStack.length === 0) renderHome();
-  else if (_currentPilotIdx !== null) renderPilot();
-  else if (_currentCat) renderCat();
+  const state = history.state || { view: 'home' };
+  if (state.view === 'pilot' && _currentPilotIdx !== null) renderPilot();
+  else if (state.view === 'cat' && _currentCat) renderCat();
+  else renderHome();
 }
 
 // ── Render: Home ─────────────────────────────────────────────────────────
@@ -571,7 +603,6 @@ function renderCat() {
     const laps = p.lapsCompleted||0;
     const timeStr = p.totalTime||'';
 
-    // Find global index in _data.pilots
     const globalIdx = _data.pilots.findIndex(x => x.dorsal===p.dorsal && x.cat===p.cat);
 
     items += `<div class="pilot-row${p.dnf?' dnf':''}${p.dsq?' dsq':''}" onclick="navPilot(${globalIdx})">
@@ -609,10 +640,8 @@ function renderPilot() {
   document.getElementById('topbarTitle').textContent = fmtName(p.name);
   document.getElementById('topbarSub').textContent = cat + ' · Nº ' + (p.dorsal||'—');
 
-  // Status indicator
   const statusStr = p.dsq ? '⛔ DSQ' : p.dnf ? '🚩 DNF' : p.finishTime ? '✓ Finalizado' : '⏱ En carrera';
 
-  // Stats row
   const statsHtml = `
     <div class="stat-row">
       <div class="stat-box highlight">
@@ -637,7 +666,6 @@ function renderPilot() {
       </div>
     </div>`;
 
-  // Scores grid
   const scores = p.scores || [[], [], []];
   const lapLabels = ['1ª Vuelta', '2ª Vuelta', '3ª Vuelta'];
   const lapPts = [p.lap1Points, p.lap2Points, p.lap3Points];
@@ -665,7 +693,6 @@ function renderPilot() {
     scoreRows += `<tr${rowClass}>${cells}</tr>`;
   }
 
-  // Total row
   let totalCells = '<td>TOTAL</td>';
   for (let z=0; z<numZones; z++) {
     let zTotal = 0;
@@ -710,13 +737,15 @@ function escHtml(s) {
 }
 function fmtName(n) {
   if (!n) return '—';
-  // "APELLIDO APELLIDO, Nombre" → "Nombre Apellido Apellido"
   const parts = n.split(',');
   if (parts.length === 2) return (parts[1].trim() + ' ' + parts[0].trim());
   return n;
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────
+// Inicializar el estado del historial para la pantalla home
+history.replaceState({ view: 'home' }, '', window.location.href);
+
 fetchData();
 startRefresh();
 </script>
